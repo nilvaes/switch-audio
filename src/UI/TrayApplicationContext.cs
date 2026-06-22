@@ -16,6 +16,8 @@ public class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _settings = AppSettings.Load();
+        SyncStartupSettingWithRegistry();
+
         _hotkeyWindow = new HotkeyWindow();
         _hotkeyWindow.HotkeyPressed += OnHotkeyPressed;
 
@@ -28,7 +30,7 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon = new NotifyIcon
         {
             Text = "Switch Audio",
-            Icon = SystemIcons.Application,
+            Icon = AppIcon.GetTrayIcon(),
             Visible = true,
             ContextMenuStrip = BuildMenu()
         };
@@ -41,9 +43,14 @@ public class TrayApplicationContext : ApplicationContext
             _trayIcon.ShowBalloonTip(
                 3000,
                 "Switch Audio",
-                "Right-click the tray icon to pick Device A and Device B.",
+                "Right-click the tray icon and choose \"Choose devices…\".",
                 ToolTipIcon.Info);
         }
+    }
+
+    private void SyncStartupSettingWithRegistry()
+    {
+        _settings.StartWithWindows = StartupManager.IsEnabled();
     }
 
     private ContextMenuStrip BuildMenu()
@@ -59,20 +66,16 @@ public class TrayApplicationContext : ApplicationContext
 
         var current = _audioManager.GetDefaultDevice();
         menu.Items.Add(new ToolStripLabel($"Current: {current?.Name ?? "Unknown"}") { Enabled = false });
+
+        string deviceSummary = _settings.IsConfigured
+            ? $"{_settings.DeviceAName} ↔ {_settings.DeviceBName}"
+            : "not configured";
+        menu.Items.Add(new ToolStripLabel($"Favorites: {deviceSummary}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
 
-        var deviceAMenu = new ToolStripMenuItem($"Device A: {_settings.DeviceAName ?? "not set"}");
-        var deviceBMenu = new ToolStripMenuItem($"Device B: {_settings.DeviceBName ?? "not set"}");
-
-        foreach (var device in _audioManager.GetPlaybackDevices())
-        {
-            deviceAMenu.DropDownItems.Add(CreateDeviceMenuItem(device, slot: 'A'));
-            deviceBMenu.DropDownItems.Add(CreateDeviceMenuItem(device, slot: 'B'));
-        }
-
-        menu.Items.Add(deviceAMenu);
-        menu.Items.Add(deviceBMenu);
-        menu.Items.Add(new ToolStripSeparator());
+        var chooseDevicesItem = new ToolStripMenuItem("Choose devices…");
+        chooseDevicesItem.Click += (_, _) => ShowDevicePicker();
+        menu.Items.Add(chooseDevicesItem);
 
         var switchItem = new ToolStripMenuItem("Switch now")
         {
@@ -90,6 +93,16 @@ public class TrayApplicationContext : ApplicationContext
 
         menu.Items.Add(new ToolStripSeparator());
 
+        var startupItem = new ToolStripMenuItem("Start with Windows")
+        {
+            Checked = _settings.StartWithWindows,
+            CheckOnClick = true
+        };
+        startupItem.Click += (_, _) => ToggleStartup(startupItem);
+        menu.Items.Add(startupItem);
+
+        menu.Items.Add(new ToolStripSeparator());
+
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) =>
         {
@@ -99,43 +112,45 @@ public class TrayApplicationContext : ApplicationContext
         menu.Items.Add(exitItem);
     }
 
-    private ToolStripMenuItem CreateDeviceMenuItem(AudioDevice device, char slot)
+    private void ShowDevicePicker()
     {
-        bool isDeviceA = slot == 'A';
-        bool selected = isDeviceA
-            ? device.Id == _settings.DeviceAId
-            : device.Id == _settings.DeviceBId;
-
-        var item = new ToolStripMenuItem(device.Name) { Checked = selected };
-        item.Click += (_, _) =>
+        var devices = _audioManager.GetPlaybackDevices();
+        if (devices.Count < 2)
         {
-            if (isDeviceA)
-            {
-                if (device.Id == _settings.DeviceBId)
-                {
-                    ShowTrayWarning("Device A must be different from Device B.");
-                    return;
-                }
+            ShowTrayWarning("You need at least 2 audio output devices.");
+            return;
+        }
 
-                _settings.DeviceAId = device.Id;
-                _settings.DeviceAName = device.Name;
-            }
-            else
-            {
-                if (device.Id == _settings.DeviceAId)
-                {
-                    ShowTrayWarning("Device B must be different from Device A.");
-                    return;
-                }
+        using var picker = new DevicePickerForm(devices, _settings.DeviceAId, _settings.DeviceBId);
+        if (picker.ShowDialog() != DialogResult.OK)
+            return;
 
-                _settings.DeviceBId = device.Id;
-                _settings.DeviceBName = device.Name;
-            }
+        _settings.DeviceAId = picker.SelectedDeviceAId;
+        _settings.DeviceAName = picker.SelectedDeviceAName;
+        _settings.DeviceBId = picker.SelectedDeviceBId;
+        _settings.DeviceBName = picker.SelectedDeviceBName;
+        _settings.Save();
 
+        _trayIcon.ShowBalloonTip(
+            2000,
+            "Switch Audio",
+            $"Saved: {picker.SelectedDeviceAName} ↔ {picker.SelectedDeviceBName}",
+            ToolTipIcon.Info);
+    }
+
+    private void ToggleStartup(ToolStripMenuItem startupItem)
+    {
+        try
+        {
+            StartupManager.SetEnabled(startupItem.Checked);
+            _settings.StartWithWindows = startupItem.Checked;
             _settings.Save();
-        };
-
-        return item;
+        }
+        catch (Exception ex)
+        {
+            startupItem.Checked = !startupItem.Checked;
+            ShowTrayWarning(ex.Message);
+        }
     }
 
     private void ChangeHotkey()
@@ -160,9 +175,7 @@ public class TrayApplicationContext : ApplicationContext
         bool hasB = devices.Any(d => d.Id == _settings.DeviceBId);
 
         if (!hasA || !hasB)
-        {
             ShowTrayWarning("A saved device is unplugged or unavailable. Pick devices again.");
-        }
     }
 
     private void ShowTrayWarning(string message)
@@ -186,7 +199,7 @@ public class TrayApplicationContext : ApplicationContext
     {
         if (!_settings.IsConfigured)
         {
-            ShowTrayWarning("Pick Device A and Device B from the tray menu first.");
+            ShowTrayWarning("Choose Device A and Device B first.");
             return;
         }
 

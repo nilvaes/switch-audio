@@ -12,6 +12,7 @@ public class AppSettings
     public string? DeviceBName { get; set; }
     public uint HotkeyModifiers { get; set; } = HotkeyManager.ModControl | HotkeyManager.ModAlt;
     public int HotkeyKey { get; set; } = (int)System.Windows.Forms.Keys.S;
+    public bool StartWithWindows { get; set; }
 
     [JsonIgnore]
     public bool IsConfigured => !string.IsNullOrEmpty(DeviceAId) && !string.IsNullOrEmpty(DeviceBId);
