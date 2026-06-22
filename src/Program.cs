@@ -1,3 +1,5 @@
+using SwitchAudio.UI;
+
 namespace SwitchAudio;
 
 static class Program

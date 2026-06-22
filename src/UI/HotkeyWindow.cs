@@ -15,13 +15,6 @@ internal class HotkeyWindow : Form
         Size = new Size(0, 0);
     }
 
-    protected override void SetVisibleCore(bool value)
-    {
-        // Keep the form hidden but alive so it can receive hotkey messages.
-        if (!IsHandleCreated)
-            base.SetVisibleCore(false);
-    }
-
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == Input.HotkeyManager.WmHotkey)

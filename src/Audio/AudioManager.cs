@@ -51,9 +51,15 @@ public class AudioManager
 
     public void SetDefaultDevice(string deviceId)
     {
-        _policyConfig.SetDefaultEndpoint(deviceId, ERole.eConsole);
-        _policyConfig.SetDefaultEndpoint(deviceId, ERole.eMultimedia);
-        _policyConfig.SetDefaultEndpoint(deviceId, ERole.eCommunications);
+        ThrowIfFailed(_policyConfig.SetDefaultEndpoint(deviceId, ERole.eConsole), "set default console device");
+        ThrowIfFailed(_policyConfig.SetDefaultEndpoint(deviceId, ERole.eMultimedia), "set default multimedia device");
+        ThrowIfFailed(_policyConfig.SetDefaultEndpoint(deviceId, ERole.eCommunications), "set default communications device");
+    }
+
+    private static void ThrowIfFailed(int hresult, string action)
+    {
+        if (hresult != 0)
+            throw new InvalidOperationException($"Failed to {action} (error 0x{hresult:X8}).");
     }
 
     public AudioDevice Toggle(string deviceAId, string deviceBId)

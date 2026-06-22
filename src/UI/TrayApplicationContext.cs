@@ -17,8 +17,13 @@ public class TrayApplicationContext : ApplicationContext
     {
         _settings = AppSettings.Load();
         _hotkeyWindow = new HotkeyWindow();
-        _hotkeyManager = new HotkeyManager(_hotkeyWindow.Handle);
         _hotkeyWindow.HotkeyPressed += OnHotkeyPressed;
+
+        // Show() creates the window handle Windows needs for RegisterHotKey.
+        _hotkeyWindow.Show();
+        _hotkeyWindow.Visible = false;
+
+        _hotkeyManager = new HotkeyManager(_hotkeyWindow.Handle);
 
         _trayIcon = new NotifyIcon
         {
@@ -28,8 +33,8 @@ public class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = BuildMenu()
         };
 
-        _hotkeyWindow.CreateControl();
         RegisterHotkey();
+        WarnIfSavedDevicesMissing();
 
         if (!_settings.IsConfigured)
         {
@@ -106,17 +111,28 @@ public class TrayApplicationContext : ApplicationContext
         {
             if (isDeviceA)
             {
+                if (device.Id == _settings.DeviceBId)
+                {
+                    ShowTrayWarning("Device A must be different from Device B.");
+                    return;
+                }
+
                 _settings.DeviceAId = device.Id;
                 _settings.DeviceAName = device.Name;
             }
             else
             {
+                if (device.Id == _settings.DeviceAId)
+                {
+                    ShowTrayWarning("Device B must be different from Device A.");
+                    return;
+                }
+
                 _settings.DeviceBId = device.Id;
                 _settings.DeviceBName = device.Name;
             }
 
             _settings.Save();
-            _trayIcon.ContextMenuStrip = BuildMenu();
         };
 
         return item;
@@ -132,7 +148,26 @@ public class TrayApplicationContext : ApplicationContext
         _settings.HotkeyKey = (int)picker.Key;
         _settings.Save();
         RegisterHotkey();
-        _trayIcon.ContextMenuStrip = BuildMenu();
+    }
+
+    private void WarnIfSavedDevicesMissing()
+    {
+        if (!_settings.IsConfigured)
+            return;
+
+        var devices = _audioManager.GetPlaybackDevices();
+        bool hasA = devices.Any(d => d.Id == _settings.DeviceAId);
+        bool hasB = devices.Any(d => d.Id == _settings.DeviceBId);
+
+        if (!hasA || !hasB)
+        {
+            ShowTrayWarning("A saved device is unplugged or unavailable. Pick devices again.");
+        }
+    }
+
+    private void ShowTrayWarning(string message)
+    {
+        _trayIcon.ShowBalloonTip(4000, "Switch Audio", message, ToolTipIcon.Warning);
     }
 
     private void RegisterHotkey()
@@ -142,13 +177,7 @@ public class TrayApplicationContext : ApplicationContext
 
         _hotkeyId = _hotkeyManager.Register(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
         if (_hotkeyId < 0)
-        {
-            _trayIcon.ShowBalloonTip(
-                4000,
-                "Switch Audio",
-                "Could not register hotkey — another app may be using it.",
-                ToolTipIcon.Warning);
-        }
+            ShowTrayWarning("Could not register hotkey — another app may be using it.");
     }
 
     private void OnHotkeyPressed() => PerformSwitch();
@@ -157,11 +186,15 @@ public class TrayApplicationContext : ApplicationContext
     {
         if (!_settings.IsConfigured)
         {
-            _trayIcon.ShowBalloonTip(
-                3000,
-                "Switch Audio",
-                "Pick Device A and Device B from the tray menu first.",
-                ToolTipIcon.Warning);
+            ShowTrayWarning("Pick Device A and Device B from the tray menu first.");
+            return;
+        }
+
+        var devices = _audioManager.GetPlaybackDevices();
+        if (!devices.Any(d => d.Id == _settings.DeviceAId) ||
+            !devices.Any(d => d.Id == _settings.DeviceBId))
+        {
+            ShowTrayWarning("A saved device is unplugged or unavailable. Pick devices again.");
             return;
         }
 
@@ -173,7 +206,7 @@ public class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            _trayIcon.ShowBalloonTip(4000, "Switch Audio", ex.Message, ToolTipIcon.Error);
+            ShowTrayWarning(ex.Message);
         }
     }
 

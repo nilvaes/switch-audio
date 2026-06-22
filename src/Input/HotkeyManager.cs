@@ -30,6 +30,9 @@ public class HotkeyManager : IDisposable
     {
         int id = _nextId++;
         bool success = RegisterHotKey(_handle, id, modifiers | ModNoRepeat, (uint)key);
+        if (!success)
+            _nextId--;
+
         return success ? id : -1;
     }
 
