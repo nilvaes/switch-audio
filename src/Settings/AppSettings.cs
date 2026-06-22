@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SwitchAudio.Input;
 
 namespace SwitchAudio.Settings;
