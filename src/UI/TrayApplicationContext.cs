@@ -101,6 +101,18 @@ public class TrayApplicationContext : ApplicationContext
         startupItem.Click += (_, _) => ToggleStartup(startupItem);
         menu.Items.Add(startupItem);
 
+        var notificationsItem = new ToolStripMenuItem("Show switch notifications")
+        {
+            Checked = _settings.ShowNotifications,
+            CheckOnClick = true
+        };
+        notificationsItem.Click += (_, _) =>
+        {
+            _settings.ShowNotifications = notificationsItem.Checked;
+            _settings.Save();
+        };
+        menu.Items.Add(notificationsItem);
+
         menu.Items.Add(new ToolStripSeparator());
 
         var exitItem = new ToolStripMenuItem("Exit");
@@ -214,7 +226,8 @@ public class TrayApplicationContext : ApplicationContext
         try
         {
             var device = _audioManager.Toggle(_settings.DeviceAId!, _settings.DeviceBId!);
-            _trayIcon.ShowBalloonTip(2000, "Switch Audio", $"Now: {device.Name}", ToolTipIcon.None);
+            if (_settings.ShowNotifications)
+                _trayIcon.ShowBalloonTip(2000, "Switch Audio", $"Now: {device.Name}", ToolTipIcon.None);
             _trayIcon.Text = $"Switch Audio — {device.Name}";
         }
         catch (Exception ex)
