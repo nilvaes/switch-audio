@@ -205,7 +205,13 @@ public class TrayApplicationContext : ApplicationContext
             ShowTrayWarning("Could not register hotkey — another app may be using it.");
     }
 
-    private void OnHotkeyPressed() => PerformSwitch();
+    private void OnHotkeyPressed()
+    {
+        if (!HotkeyManager.AreModifiersPhysicallyPressed(_settings.HotkeyModifiers))
+            return;
+
+        PerformSwitch();
+    }
 
     private void PerformSwitch()
     {
