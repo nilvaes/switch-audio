@@ -66,4 +66,4 @@ Output: `publish/SwitchAudio.exe`
 
 ## License
 
-MIT
+MIT License
