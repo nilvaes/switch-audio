@@ -11,6 +11,9 @@ public class AudioManager
     private static readonly PropertyKey PkeyFriendlyName =
         new(new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"), 14);
 
+    [DllImport("ole32.dll")]
+    private static extern int PropVariantClear(ref PropVariant pvar);
+
     private readonly IMMDeviceEnumerator _enumerator;
     private readonly IPolicyConfig _policyConfig;
 
@@ -36,16 +39,30 @@ public class AudioManager
         return results;
     }
 
-    public string GetDefaultDeviceId()
+    // Returns null when Windows has no default output (e.g. every device is unplugged or disabled).
+    public string? GetDefaultDeviceId()
     {
-        _enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eConsole, out var device);
-        device.GetId(out string id);
-        return id;
+        try
+        {
+            int hr = _enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eConsole, out var device);
+            if (hr != 0 || device is null)
+                return null;
+
+            device.GetId(out string id);
+            return id;
+        }
+        catch (COMException)
+        {
+            return null;
+        }
     }
 
     public AudioDevice? GetDefaultDevice()
     {
-        string id = GetDefaultDeviceId();
+        string? id = GetDefaultDeviceId();
+        if (id is null)
+            return null;
+
         return GetPlaybackDevices().FirstOrDefault(d => d.Id == id);
     }
 
@@ -64,7 +81,7 @@ public class AudioManager
 
     public AudioDevice Toggle(string deviceAId, string deviceBId)
     {
-        string currentId = GetDefaultDeviceId();
+        string? currentId = GetDefaultDeviceId();
         string targetId = currentId == deviceAId ? deviceBId : deviceAId;
         SetDefaultDevice(targetId);
 
@@ -79,7 +96,15 @@ public class AudioManager
             device.OpenPropertyStore(0, out var store);
             var key = PkeyFriendlyName;
             store.GetValue(ref key, out var value);
-            return value.StringValue ?? "Unknown";
+            try
+            {
+                return value.StringValue ?? "Unknown";
+            }
+            finally
+            {
+                // The name string is allocated by Windows and must be freed.
+                PropVariantClear(ref value);
+            }
         }
         catch
         {
