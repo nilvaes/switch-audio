@@ -35,7 +35,8 @@ public class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = BuildMenu()
         };
 
-        RegisterHotkey();
+        if (!RegisterHotkey())
+            ShowTrayWarning($"Could not register {CurrentHotkeyLabel()} — another app may be using it.");
         WarnIfSavedDevicesMissing();
 
         if (!_settings.IsConfigured)
@@ -86,8 +87,7 @@ public class TrayApplicationContext : ApplicationContext
 
         menu.Items.Add(new ToolStripSeparator());
 
-        var hotkeyLabel = HotkeyManager.FormatHotkey(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
-        var hotkeyItem = new ToolStripMenuItem($"Hotkey: {hotkeyLabel}");
+        var hotkeyItem = new ToolStripMenuItem($"Hotkey: {CurrentHotkeyLabel()}");
         hotkeyItem.Click += (_, _) => ChangeHotkey();
         menu.Items.Add(hotkeyItem);
 
@@ -171,11 +171,28 @@ public class TrayApplicationContext : ApplicationContext
         if (picker.ShowDialog() != DialogResult.OK || !picker.Confirmed)
             return;
 
+        uint oldModifiers = _settings.HotkeyModifiers;
+        int oldKey = _settings.HotkeyKey;
+
         _settings.HotkeyModifiers = picker.Modifiers;
         _settings.HotkeyKey = (int)picker.Key;
+
+        if (!RegisterHotkey())
+        {
+            // Keep the previous hotkey instead of ending up with none.
+            string rejected = HotkeyManager.FormatHotkey(picker.Modifiers, picker.Key);
+            _settings.HotkeyModifiers = oldModifiers;
+            _settings.HotkeyKey = oldKey;
+            RegisterHotkey();
+            ShowTrayWarning($"{rejected} is already used by another app. Keeping {CurrentHotkeyLabel()}.");
+            return;
+        }
+
         _settings.Save();
-        RegisterHotkey();
     }
+
+    private string CurrentHotkeyLabel() =>
+        HotkeyManager.FormatHotkey(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
 
     private void WarnIfSavedDevicesMissing()
     {
@@ -195,14 +212,13 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon.ShowBalloonTip(4000, "Switch Audio", message, ToolTipIcon.Warning);
     }
 
-    private void RegisterHotkey()
+    private bool RegisterHotkey()
     {
         if (_hotkeyId > 0)
             _hotkeyManager.Unregister(_hotkeyId);
 
         _hotkeyId = _hotkeyManager.Register(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
-        if (_hotkeyId < 0)
-            ShowTrayWarning("Could not register hotkey — another app may be using it.");
+        return _hotkeyId > 0;
     }
 
     private void OnHotkeyPressed()
