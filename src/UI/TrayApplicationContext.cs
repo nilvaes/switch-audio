@@ -11,6 +11,7 @@ public class TrayApplicationContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly HotkeyWindow _hotkeyWindow;
     private readonly HotkeyManager _hotkeyManager;
+    private readonly SwitchOsd _osd = new();
     private int _hotkeyId = -1;
 
     public TrayApplicationContext()
@@ -34,6 +35,25 @@ public class TrayApplicationContext : ApplicationContext
             Visible = true,
             ContextMenuStrip = BuildMenu()
         };
+
+        // Left-click shows which output is playing; double-click switches; right-click opens the menu.
+        // Windows delivers the first click of a double-click as a normal click, so a double-click
+        // briefly shows the current device and then the new one — no delay needed to tell them apart.
+        _trayIcon.MouseClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                ShowCurrentDevice();
+        };
+        _trayIcon.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                PerformSwitch();
+        };
+
+        // Refresh the tooltip as the mouse arrives, so it is right even if the
+        // device was changed in Windows' own sound settings.
+        _trayIcon.MouseMove += (_, _) => UpdateTooltip(throttle: true);
+        UpdateTooltip();
 
         if (!RegisterHotkey())
             ShowTrayWarning($"Could not register {CurrentHotkeyLabel()} — another app may be using it.");
@@ -71,7 +91,13 @@ public class TrayApplicationContext : ApplicationContext
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        menu.Opening += (_, _) => RefreshMenu(menu);
+        menu.Opening += (_, e) =>
+        {
+            RefreshMenu(menu);
+            // WinForms pre-cancels opening a menu that is empty — which this one is on the first
+            // right-click, before RefreshMenu fills it. Without this the first right-click does nothing.
+            e.Cancel = false;
+        };
         return menu;
     }
 
@@ -79,25 +105,31 @@ public class TrayApplicationContext : ApplicationContext
     {
         menu.Items.Clear();
 
-        var current = _audioManager.GetDefaultDevice();
-        menu.Items.Add(new ToolStripLabel($"Current: {current?.Name ?? "Unknown"}") { Enabled = false });
+        var devices = _audioManager.GetPlaybackDevices();
+        string? currentId = _audioManager.GetDefaultDeviceId();
 
-        string deviceSummary = _settings.IsConfigured
-            ? $"{_settings.DeviceAName} ↔ {_settings.DeviceBName}"
-            : "not configured";
-        menu.Items.Add(new ToolStripLabel($"Favorites: {deviceSummary}") { Enabled = false });
+        if (_settings.IsConfigured)
+        {
+            // The two favorites, with a checkmark on the one that's playing. Click to switch.
+            menu.Items.Add(CreateDeviceItem(_settings.DeviceAId!, _settings.DeviceAName, devices, currentId));
+            menu.Items.Add(CreateDeviceItem(_settings.DeviceBId!, _settings.DeviceBName, devices, currentId));
+
+            if (currentId != _settings.DeviceAId && currentId != _settings.DeviceBId)
+            {
+                string currentName = devices.FirstOrDefault(d => d.Id == currentId)?.Name ?? "Unknown";
+                menu.Items.Add(new ToolStripMenuItem($"Now playing on: {EscapeMenuText(currentName)}") { Enabled = false });
+            }
+        }
+        else
+        {
+            menu.Items.Add(new ToolStripMenuItem("No devices chosen yet") { Enabled = false });
+        }
+
         menu.Items.Add(new ToolStripSeparator());
 
         var chooseDevicesItem = new ToolStripMenuItem("Choose devices…");
         chooseDevicesItem.Click += (_, _) => ShowDevicePicker();
         menu.Items.Add(chooseDevicesItem);
-
-        var switchItem = new ToolStripMenuItem("Switch now")
-        {
-            Enabled = _settings.IsConfigured
-        };
-        switchItem.Click += (_, _) => PerformSwitch();
-        menu.Items.Add(switchItem);
 
         menu.Items.Add(new ToolStripSeparator());
 
@@ -115,7 +147,7 @@ public class TrayApplicationContext : ApplicationContext
         startupItem.Click += (_, _) => ToggleStartup(startupItem);
         menu.Items.Add(startupItem);
 
-        var notificationsItem = new ToolStripMenuItem("Show switch notifications")
+        var notificationsItem = new ToolStripMenuItem("Show switch popup")
         {
             Checked = _settings.ShowNotifications,
             CheckOnClick = true
@@ -137,6 +169,27 @@ public class TrayApplicationContext : ApplicationContext
         };
         menu.Items.Add(exitItem);
     }
+
+    private ToolStripMenuItem CreateDeviceItem(
+        string deviceId,
+        string? savedName,
+        IReadOnlyList<AudioDevice> devices,
+        string? currentId)
+    {
+        var device = devices.FirstOrDefault(d => d.Id == deviceId);
+        string name = EscapeMenuText(device?.Name ?? savedName ?? "Unknown device");
+
+        var item = new ToolStripMenuItem(device is null ? $"{name} (unavailable)" : name)
+        {
+            Checked = deviceId == currentId,
+            Enabled = device is not null
+        };
+        item.Click += (_, _) => SwitchTo(deviceId);
+        return item;
+    }
+
+    // "&" in menu text marks a keyboard shortcut; double it so device names show as-is.
+    private static string EscapeMenuText(string text) => text.Replace("&", "&&");
 
     private void ShowDevicePicker()
     {
@@ -259,19 +312,79 @@ public class TrayApplicationContext : ApplicationContext
             return;
         }
 
+        // If something other than A is playing (B, or a third device), go to A.
+        string targetId = _audioManager.GetDefaultDeviceId() == _settings.DeviceAId
+            ? _settings.DeviceBId!
+            : _settings.DeviceAId!;
+
+        SwitchTo(targetId);
+    }
+
+    // Shown even when switch popups are turned off, since the user asked by clicking.
+    private void ShowCurrentDevice()
+    {
+        string? name = null;
         try
         {
-            var device = _audioManager.Toggle(_settings.DeviceAId!, _settings.DeviceBId!);
+            name = _audioManager.GetDefaultDevice()?.Name;
+        }
+        catch
+        {
+            // Fall through to the "no device" message.
+        }
+
+        _osd.ShowMessage(name ?? "No output device");
+        SetTooltip(name);
+    }
+
+    private void SwitchTo(string deviceId)
+    {
+        try
+        {
+            _audioManager.SetDefaultDevice(deviceId);
+
+            string name = _audioManager.GetPlaybackDevices().FirstOrDefault(d => d.Id == deviceId)?.Name
+                ?? "Unknown device";
             if (_settings.ShowNotifications)
-                _trayIcon.ShowBalloonTip(2000, "Switch Audio", $"Now: {device.Name}", ToolTipIcon.None);
-            // NotifyIcon.Text throws if it is too long; long Bluetooth names can hit the limit.
-            string tooltip = $"Switch Audio — {device.Name}";
-            _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..62] + "…";
+                _osd.ShowMessage(name);
+
+            // We already know the new device, so skip asking Windows again — keeps fast switching snappy.
+            SetTooltip(name);
         }
         catch (Exception ex)
         {
             ShowTrayWarning(ex.Message);
         }
+    }
+
+    private DateTime _lastTooltipUpdate;
+
+    private void UpdateTooltip(bool throttle = false)
+    {
+        // MouseMove fires constantly while hovering; asking Windows once a second is plenty.
+        if (throttle && DateTime.UtcNow - _lastTooltipUpdate < TimeSpan.FromSeconds(1))
+            return;
+        _lastTooltipUpdate = DateTime.UtcNow;
+
+        string? name = null;
+        try
+        {
+            name = _audioManager.GetDefaultDevice()?.Name;
+        }
+        catch
+        {
+            // Leave the plain title if Windows can't be asked right now.
+        }
+
+        SetTooltip(name);
+    }
+
+    private void SetTooltip(string? deviceName)
+    {
+        // NotifyIcon.Text throws if it is too long; long Bluetooth names can hit the limit.
+        string tooltip = deviceName is null ? "Switch Audio" : $"Switch Audio — {deviceName}";
+        _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..62] + "…";
+        _lastTooltipUpdate = DateTime.UtcNow;
     }
 
     protected override void Dispose(bool disposing)
@@ -280,6 +393,7 @@ public class TrayApplicationContext : ApplicationContext
         {
             _hotkeyManager.Dispose();
             _hotkeyWindow.Dispose();
+            _osd.Dispose();
             _trayIcon.Dispose();
         }
 
