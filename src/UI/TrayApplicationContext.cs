@@ -52,6 +52,20 @@ public class TrayApplicationContext : ApplicationContext
     private void SyncStartupSettingWithRegistry()
     {
         _settings.StartWithWindows = StartupManager.IsEnabled();
+
+        // Release downloads have the version in the file name, so after an update the
+        // startup entry would still launch the old exe. Point it at the one running now.
+        if (_settings.StartWithWindows)
+        {
+            try
+            {
+                StartupManager.SetEnabled(true);
+            }
+            catch
+            {
+                // Not critical — the menu toggle reports errors if the user changes it.
+            }
+        }
     }
 
     private ContextMenuStrip BuildMenu()
@@ -250,7 +264,9 @@ public class TrayApplicationContext : ApplicationContext
             var device = _audioManager.Toggle(_settings.DeviceAId!, _settings.DeviceBId!);
             if (_settings.ShowNotifications)
                 _trayIcon.ShowBalloonTip(2000, "Switch Audio", $"Now: {device.Name}", ToolTipIcon.None);
-            _trayIcon.Text = $"Switch Audio — {device.Name}";
+            // NotifyIcon.Text throws if it is too long; long Bluetooth names can hit the limit.
+            string tooltip = $"Switch Audio — {device.Name}";
+            _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..62] + "…";
         }
         catch (Exception ex)
         {
