@@ -53,19 +53,21 @@ public class HotkeyPickerForm : Form
     {
         e.SuppressKeyPress = true;
 
-        if (e.KeyCode is Keys.ShiftKey or Keys.ControlKey or Keys.Menu)
+        if (e.KeyCode is Keys.ShiftKey or Keys.ControlKey or Keys.Menu or Keys.LWin or Keys.RWin)
             return;
+
+        // Shift alone isn't allowed: a global Shift+letter hotkey would stop that
+        // capital letter from being typed anywhere in Windows.
+        if (!e.Control && !e.Alt)
+        {
+            _instructionLabel.Text = "Include Ctrl or Alt (Shift alone would block normal typing).";
+            return;
+        }
 
         uint mods = 0;
         if (e.Control) mods |= Input.HotkeyManager.ModControl;
         if (e.Alt) mods |= Input.HotkeyManager.ModAlt;
         if (e.Shift) mods |= Input.HotkeyManager.ModShift;
-
-        if (mods == 0)
-        {
-            _instructionLabel.Text = "Include at least Ctrl, Alt, or Shift.";
-            return;
-        }
 
         Modifiers = mods;
         Key = e.KeyCode;

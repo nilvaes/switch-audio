@@ -35,7 +35,8 @@ public class TrayApplicationContext : ApplicationContext
             ContextMenuStrip = BuildMenu()
         };
 
-        RegisterHotkey();
+        if (!RegisterHotkey())
+            ShowTrayWarning($"Could not register {CurrentHotkeyLabel()} — another app may be using it.");
         WarnIfSavedDevicesMissing();
 
         if (!_settings.IsConfigured)
@@ -51,6 +52,20 @@ public class TrayApplicationContext : ApplicationContext
     private void SyncStartupSettingWithRegistry()
     {
         _settings.StartWithWindows = StartupManager.IsEnabled();
+
+        // Release downloads have the version in the file name, so after an update the
+        // startup entry would still launch the old exe. Point it at the one running now.
+        if (_settings.StartWithWindows)
+        {
+            try
+            {
+                StartupManager.SetEnabled(true);
+            }
+            catch
+            {
+                // Not critical — the menu toggle reports errors if the user changes it.
+            }
+        }
     }
 
     private ContextMenuStrip BuildMenu()
@@ -86,8 +101,7 @@ public class TrayApplicationContext : ApplicationContext
 
         menu.Items.Add(new ToolStripSeparator());
 
-        var hotkeyLabel = HotkeyManager.FormatHotkey(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
-        var hotkeyItem = new ToolStripMenuItem($"Hotkey: {hotkeyLabel}");
+        var hotkeyItem = new ToolStripMenuItem($"Hotkey: {CurrentHotkeyLabel()}");
         hotkeyItem.Click += (_, _) => ChangeHotkey();
         menu.Items.Add(hotkeyItem);
 
@@ -171,11 +185,28 @@ public class TrayApplicationContext : ApplicationContext
         if (picker.ShowDialog() != DialogResult.OK || !picker.Confirmed)
             return;
 
+        uint oldModifiers = _settings.HotkeyModifiers;
+        int oldKey = _settings.HotkeyKey;
+
         _settings.HotkeyModifiers = picker.Modifiers;
         _settings.HotkeyKey = (int)picker.Key;
+
+        if (!RegisterHotkey())
+        {
+            // Keep the previous hotkey instead of ending up with none.
+            string rejected = HotkeyManager.FormatHotkey(picker.Modifiers, picker.Key);
+            _settings.HotkeyModifiers = oldModifiers;
+            _settings.HotkeyKey = oldKey;
+            RegisterHotkey();
+            ShowTrayWarning($"{rejected} is already used by another app. Keeping {CurrentHotkeyLabel()}.");
+            return;
+        }
+
         _settings.Save();
-        RegisterHotkey();
     }
+
+    private string CurrentHotkeyLabel() =>
+        HotkeyManager.FormatHotkey(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
 
     private void WarnIfSavedDevicesMissing()
     {
@@ -195,14 +226,13 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon.ShowBalloonTip(4000, "Switch Audio", message, ToolTipIcon.Warning);
     }
 
-    private void RegisterHotkey()
+    private bool RegisterHotkey()
     {
         if (_hotkeyId > 0)
             _hotkeyManager.Unregister(_hotkeyId);
 
         _hotkeyId = _hotkeyManager.Register(_settings.HotkeyModifiers, (Keys)_settings.HotkeyKey);
-        if (_hotkeyId < 0)
-            ShowTrayWarning("Could not register hotkey — another app may be using it.");
+        return _hotkeyId > 0;
     }
 
     private void OnHotkeyPressed()
@@ -234,7 +264,9 @@ public class TrayApplicationContext : ApplicationContext
             var device = _audioManager.Toggle(_settings.DeviceAId!, _settings.DeviceBId!);
             if (_settings.ShowNotifications)
                 _trayIcon.ShowBalloonTip(2000, "Switch Audio", $"Now: {device.Name}", ToolTipIcon.None);
-            _trayIcon.Text = $"Switch Audio — {device.Name}";
+            // NotifyIcon.Text throws if it is too long; long Bluetooth names can hit the limit.
+            string tooltip = $"Switch Audio — {device.Name}";
+            _trayIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..62] + "…";
         }
         catch (Exception ex)
         {
