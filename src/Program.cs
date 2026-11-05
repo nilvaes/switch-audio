@@ -7,8 +7,15 @@ static class Program
     [STAThread]
     static void Main()
     {
+        // Render crisply at any display scaling (otherwise Windows stretches the windows and they look blurry).
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+
+        // Follow the Windows light/dark app setting. WinForms still marks this API as experimental.
+#pragma warning disable WFO5001
+        Application.SetColorMode(SystemColorMode.System);
+#pragma warning restore WFO5001
 
         // Only one copy may run: a second one would add a duplicate tray icon and
         // fail to register the hotkey the first copy already owns.

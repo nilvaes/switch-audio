@@ -18,6 +18,10 @@ public class DevicePickerForm : Form
         string? currentAId,
         string? currentBId)
     {
+        // Layout below is in 96-DPI pixels; scale it to the screen's DPI.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         Text = "Choose devices";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;

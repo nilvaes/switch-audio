@@ -8,8 +8,10 @@ Built with C# and WinForms — no installers, no NuGet dependencies.
 
 1. Runs in the **system tray** (near the clock)
 2. You pick **Device A** and **Device B** from the right-click menu
-3. Press **Ctrl + Alt + S** (customizable) to toggle between them
-4. Shows a small balloon notification with the active device name
+3. Press **Ctrl + Alt + S** (customizable) or **double-click the tray icon** to toggle between them
+4. Shows a small popup near the bottom of the screen with the device you switched to (can be turned off)
+5. **Click the tray icon once** (or hover it) to see which device is playing, without switching
+6. The right-click menu lists both devices with a checkmark on the active one — click either to switch to it
 
 ## Download & run (Windows)
 
