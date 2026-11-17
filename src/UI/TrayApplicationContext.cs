@@ -47,7 +47,7 @@ public class TrayApplicationContext : ApplicationContext
         _trayIcon.MouseDoubleClick += (_, e) =>
         {
             if (e.Button == MouseButtons.Left)
-                PerformSwitch();
+                PerformSwitch(nearCursor: true);
         };
 
         // Refresh the tooltip as the mouse arrives, so it is right even if the
@@ -184,7 +184,7 @@ public class TrayApplicationContext : ApplicationContext
             Checked = deviceId == currentId,
             Enabled = device is not null
         };
-        item.Click += (_, _) => SwitchTo(deviceId);
+        item.Click += (_, _) => SwitchTo(deviceId, nearCursor: true);
         return item;
     }
 
@@ -293,10 +293,10 @@ public class TrayApplicationContext : ApplicationContext
         if (!HotkeyManager.AreModifiersPhysicallyPressed(_settings.HotkeyModifiers))
             return;
 
-        PerformSwitch();
+        PerformSwitch(nearCursor: false);
     }
 
-    private void PerformSwitch()
+    private void PerformSwitch(bool nearCursor)
     {
         if (!_settings.IsConfigured)
         {
@@ -317,7 +317,7 @@ public class TrayApplicationContext : ApplicationContext
             ? _settings.DeviceBId!
             : _settings.DeviceAId!;
 
-        SwitchTo(targetId);
+        SwitchTo(targetId, nearCursor);
     }
 
     // Shown even when switch popups are turned off, since the user asked by clicking.
@@ -333,11 +333,11 @@ public class TrayApplicationContext : ApplicationContext
             // Fall through to the "no device" message.
         }
 
-        _osd.ShowMessage(name ?? "No output device");
+        _osd.ShowMessage(name ?? "No output device", nearCursor: true);
         SetTooltip(name);
     }
 
-    private void SwitchTo(string deviceId)
+    private void SwitchTo(string deviceId, bool nearCursor)
     {
         try
         {
@@ -346,7 +346,7 @@ public class TrayApplicationContext : ApplicationContext
             string name = _audioManager.GetPlaybackDevices().FirstOrDefault(d => d.Id == deviceId)?.Name
                 ?? "Unknown device";
             if (_settings.ShowNotifications)
-                _osd.ShowMessage(name);
+                _osd.ShowMessage(name, nearCursor);
 
             // We already know the new device, so skip asking Windows again — keeps fast switching snappy.
             SetTooltip(name);

@@ -19,8 +19,23 @@ internal sealed class SwitchOsd : Form
     private const double VisibleOpacity = 0.96;
     private const int VisibleMilliseconds = 1300;
 
+    private static readonly IntPtr HwndTopmost = new(-1);
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpShowWindow = 0x0040;
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder className, int maxCount);
 
     private readonly Label _iconLabel;
     private readonly Label _textLabel;
@@ -95,8 +110,12 @@ internal sealed class SwitchOsd : Form
         }
     }
 
-    public void ShowMessage(string text)
+    // nearCursor: true when the user clicked the tray icon or menu (show it where they are looking),
+    // false for the hotkey (show it on the screen of the app they are using, wherever the mouse is).
+    public void ShowMessage(string text, bool nearCursor)
     {
+        _targetScreen = nearCursor ? Screen.FromPoint(Cursor.Position) : ScreenOfForegroundApp();
+
         ApplyTheme();
         _textLabel.Text = text;
         LayoutContent();
@@ -109,7 +128,39 @@ internal sealed class SwitchOsd : Form
         if (!Visible)
             Show();
 
+        // Put it back on top of the always-on-top windows each time. Without this, any topmost
+        // window that came forward since (the taskbar, an overlay, a borderless game) covers it.
+        // SetWindowPos with NOACTIVATE, not the TopMost property, so it never steals focus.
+        SetWindowPos(Handle, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
+
         _holdTimer.Start();
+    }
+
+    private Screen? _targetScreen;
+
+    private static Screen ScreenOfForegroundApp()
+    {
+        IntPtr hwnd = GetForegroundWindow();
+        if (hwnd != IntPtr.Zero)
+        {
+            var className = new System.Text.StringBuilder(64);
+            GetClassName(hwnd, className, className.Capacity);
+
+            // The desktop window spans every monitor, so it says nothing about where the user is.
+            if (className.ToString() is not ("Progman" or "WorkerW"))
+                return Screen.FromHandle(hwnd);
+        }
+
+        return Screen.FromPoint(Cursor.Position);
+    }
+
+    // Moving to a monitor with a different scale makes WinForms rescale the fonts;
+    // lay out again so the box fits the text and stays centered.
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        LayoutContent();
+        PlaceAboveTaskbar();
     }
 
     private void LayoutContent()
@@ -132,9 +183,9 @@ internal sealed class SwitchOsd : Form
 
     private void PlaceAboveTaskbar()
     {
-        // Centered near the bottom of the screen the mouse is on, raised a little above the
-        // taskbar (the working area already excludes the taskbar, wherever it is docked).
-        Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        // Centered near the bottom of the chosen screen, raised a little above the taskbar
+        // (the working area already excludes the taskbar, wherever it is docked).
+        Rectangle area = (_targetScreen ?? Screen.FromPoint(Cursor.Position)).WorkingArea;
         int lift = Math.Max(LogicalToDeviceUnits(48), area.Height / 10);
         Location = new Point(area.Left + (area.Width - Width) / 2, area.Bottom - Height - lift);
     }
